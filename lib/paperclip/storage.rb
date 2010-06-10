@@ -243,5 +243,59 @@ module Paperclip
       private :find_credentials
 
     end
+
+
+    module Cif
+      def self.extended base
+      end
+
+      def exists?(style_name = default_style)
+        if original_filename
+          File.exist?(path(style_name))
+        else
+          false
+        end
+      end
+
+      # Returns representation of the data of the file assigned to the given
+      # style, in the format most representative of the current storage.
+      def to_file style_name = default_style
+        @queued_for_write[style_name] || (File.new(path(style_name), 'rb') if exists?(style_name))
+      end
+
+      def flush_writes #:nodoc:
+        @queued_for_write.each do |style_name, file|
+          file.close
+          FileUtils.mkdir_p(File.dirname(path(style_name)))
+          log("saving #{path(style_name)}")
+          FileUtils.cp(file.path, path(style_name))
+          FileUtils.rm(file.path)
+        end
+        @queued_for_write = {}
+      end
+
+      def flush_deletes #:nodoc:
+        @queued_for_delete.each do |path|
+          begin
+            log("deleting #{path}")
+            FileUtils.rm(path) if File.exist?(path)
+          rescue Errno::ENOENT => e
+            # ignore file-not-found, let everything else pass
+          end
+          begin
+            while(true)
+              path = File.dirname(path)
+              FileUtils.rmdir(path)
+            end
+          rescue Errno::EEXIST, Errno::ENOTEMPTY, Errno::ENOENT, Errno::EINVAL, Errno::ENOTDIR
+            # Stop trying to remove parent directories
+          rescue SystemCallError => e
+            log("There was an unexpected error while deleting directories: #{e.class}")
+            # Ignore it
+          end
+        end
+        @queued_for_delete = []
+      end
+    end
   end
 end
